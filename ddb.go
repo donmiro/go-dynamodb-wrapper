@@ -5,5 +5,5 @@ import (
 )
 
 func Hw() {
-	fmt.Println("Initial commit!")
+	fmt.Println("Initial commit!UPDATE")
 }
