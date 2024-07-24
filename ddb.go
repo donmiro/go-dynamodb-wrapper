@@ -1,4 +1,4 @@
-package ddb
+package go_dynamodb_wrapper
 
 import (
 	"fmt"
