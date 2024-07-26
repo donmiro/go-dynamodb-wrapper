@@ -16,6 +16,18 @@ type DDBTable struct {
 	partitionKeyName string
 }
 
+func NewTable(region, name, partitionKeyName string) (*DDBTable, error) {
+	if region == "" || name == "" || partitionKeyName == "" {
+		return nil, errors.New("you must specify all values: region, name & partition_key name")
+	}
+
+	return &DDBTable{
+		region:           region,
+		name:             name,
+		partitionKeyName: partitionKeyName,
+	}, nil
+}
+
 func (ddb *DDBTable) GetPartitionKeysList() ([]string, error) {
 	svc, err := svcCreator(ddb.region)
 	if err != nil {
@@ -54,6 +66,32 @@ func (ddb *DDBTable) GetPartitionKeysList() ([]string, error) {
 	return partitionKeys, nil
 }
 
+func (ddb *DDBTable) GetItem(partitionKeyValue string) (map[string]types.AttributeValue, error) {
+	svc, err := svcCreator(ddb.region)
+	if err != nil {
+		return nil, err
+	}
+
+	input := &dynamodb.GetItemInput{
+		TableName: aws.String(ddb.name),
+		Key: map[string]types.AttributeValue{
+			ddb.partitionKeyName: &types.AttributeValueMemberS{
+				Value: partitionKeyValue,
+			},
+		},
+	}
+
+	result, err := svc.GetItem(context.TODO(), input)
+	if err != nil {
+		return nil, errors.New("failed to get item")
+	}
+	if result.Item == nil {
+		return nil, errors.New("item not found")
+	}
+
+	return result.Item, nil
+}
+
 func DDBTablesList(awsRegion string) ([]string, error) {
 	svc, err := svcCreator(awsRegion)
 	if err != nil {
@@ -83,16 +121,4 @@ func svcCreator(awsRegion string) (*dynamodb.Client, error) {
 	svc := dynamodb.NewFromConfig(cfg)
 
 	return svc, nil
-}
-
-func NewTable(region, name, partitionKeyName string) (*DDBTable, error) {
-	if region == "" || name == "" || partitionKeyName == "" {
-		return nil, errors.New("you must specify all values: region, name & partition_key name")
-	}
-
-	return &DDBTable{
-		region:           region,
-		name:             name,
-		partitionKeyName: partitionKeyName,
-	}, nil
 }
