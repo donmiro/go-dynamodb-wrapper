@@ -92,6 +92,29 @@ func (ddb *DDBTable) GetItem(partitionKeyValue string) (map[string]types.Attribu
 	return result.Item, nil
 }
 
+func (ddb *DDBTable) DeleteItem(partitionKeyValue string) error {
+	svc, err := svcCreator(ddb.region)
+	if err != nil {
+		return err
+	}
+
+	input := &dynamodb.DeleteItemInput{
+		TableName: aws.String(ddb.name),
+		Key: map[string]types.AttributeValue{
+			ddb.partitionKeyName: &types.AttributeValueMemberS{
+				Value: partitionKeyValue,
+			},
+		},
+	}
+
+	_, err = svc.DeleteItem(context.TODO(), input)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func DDBTablesList(awsRegion string) ([]string, error) {
 	svc, err := svcCreator(awsRegion)
 	if err != nil {
