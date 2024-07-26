@@ -23,17 +23,15 @@ func cfgCreator(awsRegion string) (aws.Config, error) {
 func DDBTablesList(awsRegion string) ([]string, error) {
 	cfg, err := cfgCreator(awsRegion)
 
-	if err == nil {
-		// Create service client
-		svc := dynamodb.NewFromConfig(cfg)
-		input := &dynamodb.ListTablesInput{}
-		result, err := svc.ListTables(context.TODO(), input)
+	// Create service client
+	svc := dynamodb.NewFromConfig(cfg)
+	input := &dynamodb.ListTablesInput{}
+	result, err := svc.ListTables(context.TODO(), input)
 
-		if err != nil {
-			log.Fatalf("Failed to list tables: %v", err)
-			return nil, err
-		}
-
-		return result.TableNames, nil
+	if err != nil {
+		log.Fatalf("Failed to list tables: %v", err)
+		return nil, err
 	}
+
+	return result.TableNames, nil
 }
