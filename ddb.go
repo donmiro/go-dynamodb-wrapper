@@ -2,6 +2,7 @@ package go_dynamodb_wrapper
 
 import (
 	"context"
+	"errors"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -10,13 +11,13 @@ import (
 )
 
 type DDBTable struct {
-	Region           string
-	Name             string
-	PartitionKeyName string
+	region           string
+	name             string
+	partitionKeyName string
 }
 
 func (ddb *DDBTable) GetPartitionKeysList() ([]string, error) {
-	svc, err := svcCreator(ddb.Region)
+	svc, err := svcCreator(ddb.region)
 	if err != nil {
 		return []string{}, err
 	}
@@ -26,8 +27,8 @@ func (ddb *DDBTable) GetPartitionKeysList() ([]string, error) {
 
 	for {
 		input := &dynamodb.ScanInput{
-			TableName:            aws.String(ddb.Name),
-			ProjectionExpression: aws.String(ddb.PartitionKeyName),
+			TableName:            aws.String(ddb.name),
+			ProjectionExpression: aws.String(ddb.partitionKeyName),
 			ExclusiveStartKey:    lastEvaluatedKey,
 		}
 
@@ -37,7 +38,7 @@ func (ddb *DDBTable) GetPartitionKeysList() ([]string, error) {
 		}
 
 		for _, item := range result.Items {
-			if pk, ok := item[ddb.PartitionKeyName]; ok {
+			if pk, ok := item[ddb.partitionKeyName]; ok {
 				if s, ok := pk.(*types.AttributeValueMemberS); ok {
 					partitionKeys = append(partitionKeys, s.Value)
 				}
@@ -82,4 +83,16 @@ func svcCreator(awsRegion string) (*dynamodb.Client, error) {
 	svc := dynamodb.NewFromConfig(cfg)
 
 	return svc, nil
+}
+
+func NewTable(region, name, partitionKeyName string) (*DDBTable, error) {
+	if region == "" || name == "" || partitionKeyName == "" {
+		return nil, errors.New("you must specify all values: region, name & partition_key name")
+	}
+
+	return &DDBTable{
+		region:           region,
+		name:             name,
+		partitionKeyName: partitionKeyName,
+	}, nil
 }
