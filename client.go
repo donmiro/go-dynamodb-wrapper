@@ -3,6 +3,9 @@ package go_dynamodb_wrapper
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log"
+	"reflect"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -28,7 +31,7 @@ func NewTable(region, name, partitionKeyName string) (*DDBTable, error) {
 	}, nil
 }
 
-func (ddb *DDBTable) GetPartitionKeysList() ([]string, error) {
+func (ddb *DDBTable) ReadPartitionKeysList() ([]string, error) {
 	svc, err := svcCreator(ddb.region)
 	if err != nil {
 		return []string{}, err
@@ -66,7 +69,7 @@ func (ddb *DDBTable) GetPartitionKeysList() ([]string, error) {
 	return partitionKeys, nil
 }
 
-func (ddb *DDBTable) GetItem(partitionKeyValue string) (map[string]types.AttributeValue, error) {
+func (ddb *DDBTable) ReadItem(partitionKeyValue string) (map[string]types.AttributeValue, error) {
 	svc, err := svcCreator(ddb.region)
 	if err != nil {
 		return nil, err
@@ -90,6 +93,62 @@ func (ddb *DDBTable) GetItem(partitionKeyValue string) (map[string]types.Attribu
 	}
 
 	return result.Item, nil
+}
+
+func (ddb *DDBTable) WriteItem(item map[string]interface{}) error {
+	svc, err := svcCreator(ddb.region)
+	if err != nil {
+		return err
+	}
+
+	dynamodbItem := convertToDynamoDBJSON(item)
+	input := &dynamodb.PutItemInput{
+		TableName: aws.String(ddb.name),
+		Item:      dynamodbItem,
+	}
+
+	_, err = svc.PutItem(context.TODO(), input)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (ddb *DDBTable) UpdateItem(partitionKeyValue string, updatedValue map[string]interface{}) error {
+	svc, err := svcCreator(ddb.region)
+	if err != nil {
+		return err
+	}
+
+	dynamoDBUpdateValues := convertToDynamoDBJSON(updatedValue)
+	updateExpression := "SET "
+	expressionAttributeValues := make(map[string]types.AttributeValue)
+	expressionAttributeNames := make(map[string]string)
+	i := 1
+	for k := range dynamoDBUpdateValues {
+		updateExpression += fmt.Sprintf("#k%d = :v%d, ", i, i)
+		expressionAttributeValues[fmt.Sprintf(":v%d", i)] = dynamoDBUpdateValues[k]
+		expressionAttributeNames[fmt.Sprintf("#k%d", i)] = k
+		i++
+	}
+
+	updateExpression = updateExpression[:len(updateExpression)-2]
+
+	input := &dynamodb.UpdateItemInput{
+		TableName:                 aws.String(ddb.name),
+		Key:                       map[string]types.AttributeValue{ddb.partitionKeyName: &types.AttributeValueMemberS{Value: partitionKeyValue}},
+		UpdateExpression:          aws.String(updateExpression),
+		ExpressionAttributeValues: expressionAttributeValues,
+		ExpressionAttributeNames:  expressionAttributeNames,
+	}
+
+	_, err = svc.UpdateItem(context.TODO(), input)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (ddb *DDBTable) DeleteItem(partitionKeyValue string) error {
@@ -144,4 +203,35 @@ func svcCreator(awsRegion string) (*dynamodb.Client, error) {
 	svc := dynamodb.NewFromConfig(cfg)
 
 	return svc, nil
+}
+
+func convertToDynamoDBJSON(regularJSON map[string]interface{}) map[string]types.AttributeValue {
+	dynamodbJSON := make(map[string]types.AttributeValue)
+	for k, v := range regularJSON {
+		dynamodbJSON[k] = convertValue(v)
+	}
+
+	return dynamodbJSON
+}
+
+func convertValue(value interface{}) types.AttributeValue {
+	switch v := value.(type) {
+	case string:
+		return &types.AttributeValueMemberS{Value: v}
+	case bool:
+		return &types.AttributeValueMemberBOOL{Value: v}
+	case int, int8, int16, int32, int64, float32, float64:
+		return &types.AttributeValueMemberN{Value: fmt.Sprintf("%v", v)}
+	case map[string]interface{}:
+		return &types.AttributeValueMemberM{Value: convertToDynamoDBJSON(v)}
+	case []interface{}:
+		var listValues []types.AttributeValue
+		for _, item := range v {
+			listValues = append(listValues, convertValue(item))
+		}
+		return &types.AttributeValueMemberL{Value: listValues}
+	default:
+		log.Fatalf("Unsupported type: %v", reflect.TypeOf(v))
+		return nil
+	}
 }
