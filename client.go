@@ -2,6 +2,7 @@ package go_dynamodb_wrapper
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -69,7 +70,7 @@ func (ddb *DDBTable) ReadPartitionKeysList() ([]string, error) {
 	return partitionKeys, nil
 }
 
-func (ddb *DDBTable) ReadItem(partitionKeyValue string) (map[string]types.AttributeValue, error) {
+func (ddb *DDBTable) ReadItem(partitionKeyValue string) (map[string]interface{}, error) {
 	svc, err := svcCreator(ddb.region)
 	if err != nil {
 		return nil, err
@@ -92,7 +93,7 @@ func (ddb *DDBTable) ReadItem(partitionKeyValue string) (map[string]types.Attrib
 		return nil, errors.New("item not found")
 	}
 
-	return result.Item, nil
+	return convertDynamoDBJSONToMap(result.Item), nil
 }
 
 func (ddb *DDBTable) WriteItem(item map[string]interface{}) error {
@@ -212,6 +213,49 @@ func convertToDynamoDBJSON(regularJSON map[string]interface{}) map[string]types.
 	}
 
 	return dynamodbJSON
+}
+
+func convertDynamoDBJSONToMap(attributes map[string]types.AttributeValue) map[string]interface{} {
+	result := make(map[string]interface{})
+	for k, v := range attributes {
+		switch val := v.(type) {
+		case *types.AttributeValueMemberS:
+			result[k] = val.Value
+		case *types.AttributeValueMemberN:
+			result[k] = val.Value
+		case *types.AttributeValueMemberBOOL:
+			result[k] = fmt.Sprintf("%v", val.Value)
+		case *types.AttributeValueMemberM:
+			jsonStr, _ := json.Marshal(convertDynamoDBJSONToMap(val.Value))
+			result[k] = string(jsonStr)
+		case *types.AttributeValueMemberL:
+			result[k] = convertDynamoDBListToSlice(val.Value)
+		default:
+			result[k] = fmt.Sprintf("%v", v)
+		}
+	}
+	return result
+}
+
+func convertDynamoDBListToSlice(list []types.AttributeValue) []interface{} {
+	var result []interface{}
+	for _, item := range list {
+		switch val := item.(type) {
+		case *types.AttributeValueMemberS:
+			result = append(result, val.Value)
+		case *types.AttributeValueMemberN:
+			result = append(result, val.Value)
+		case *types.AttributeValueMemberBOOL:
+			result = append(result, fmt.Sprintf("%v", val.Value))
+		case *types.AttributeValueMemberM:
+			result = append(result, convertDynamoDBJSONToMap(val.Value))
+		case *types.AttributeValueMemberL:
+			result = append(result, convertDynamoDBListToSlice(val.Value))
+		default:
+			result = append(result, fmt.Sprintf("%v", item))
+		}
+	}
+	return result
 }
 
 func convertValue(value interface{}) types.AttributeValue {
