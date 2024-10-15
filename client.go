@@ -70,6 +70,30 @@ func (ddb *DDBTable) ReadPartitionKeysList() ([]string, error) {
 	return partitionKeys, nil
 }
 
+func (ddb *DDBTable) ScanTable() ([]map[string]interface{}, error) {
+	svc, err := svcCreator(ddb.region)
+	if err != nil {
+		return make([]map[string]interface{}, 0), err
+	}
+
+	input := &dynamodb.ScanInput{
+		TableName: aws.String(ddb.name),
+	}
+
+	result, err := svc.Scan(context.TODO(), input)
+	if err != nil {
+		return make([]map[string]interface{}, 0), err
+	}
+
+	var returnedList []map[string]interface{}
+
+	for _, item := range result.Items {
+		returnedList = append(returnedList, convertDynamoDBJSONToMap(item))
+	}
+
+	return returnedList, nil
+}
+
 func (ddb *DDBTable) ReadItem(partitionKeyValue string) (map[string]interface{}, error) {
 	svc, err := svcCreator(ddb.region)
 	if err != nil {
