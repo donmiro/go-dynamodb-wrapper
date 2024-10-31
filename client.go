@@ -18,6 +18,7 @@ type DDBTable struct {
 	region           string
 	name             string
 	partitionKeyName string
+	client           *dynamodb.Client
 }
 
 func NewTable(region, name, partitionKeyName string) (*DDBTable, error) {
@@ -25,19 +26,23 @@ func NewTable(region, name, partitionKeyName string) (*DDBTable, error) {
 		return nil, errors.New("you must specify all values: region, name & partition_key name")
 	}
 
+	// Create DynamoDB client
+	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region))
+	if err != nil {
+		return nil, fmt.Errorf("unable to load AWS SDK config: %v", err)
+	}
+
+	client := dynamodb.NewFromConfig(cfg)
+
 	return &DDBTable{
 		region:           region,
 		name:             name,
 		partitionKeyName: partitionKeyName,
+		client:           client,
 	}, nil
 }
 
 func (ddb *DDBTable) ReadPartitionKeysList() ([]string, error) {
-	svc, err := svcCreator(ddb.region)
-	if err != nil {
-		return []string{}, err
-	}
-
 	var partitionKeys []string
 	var lastEvaluatedKey map[string]types.AttributeValue
 
@@ -48,7 +53,7 @@ func (ddb *DDBTable) ReadPartitionKeysList() ([]string, error) {
 			ExclusiveStartKey:    lastEvaluatedKey,
 		}
 
-		result, err := svc.Scan(context.TODO(), input)
+		result, err := ddb.client.Scan(context.Background(), input)
 		if err != nil {
 			return []string{}, err
 		}
@@ -71,16 +76,11 @@ func (ddb *DDBTable) ReadPartitionKeysList() ([]string, error) {
 }
 
 func (ddb *DDBTable) ScanTable() ([]map[string]interface{}, error) {
-	svc, err := svcCreator(ddb.region)
-	if err != nil {
-		return make([]map[string]interface{}, 0), err
-	}
-
 	input := &dynamodb.ScanInput{
 		TableName: aws.String(ddb.name),
 	}
 
-	result, err := svc.Scan(context.TODO(), input)
+	result, err := ddb.client.Scan(context.Background(), input)
 	if err != nil {
 		return make([]map[string]interface{}, 0), err
 	}
@@ -95,11 +95,6 @@ func (ddb *DDBTable) ScanTable() ([]map[string]interface{}, error) {
 }
 
 func (ddb *DDBTable) ReadItem(partitionKeyValue string) (map[string]interface{}, error) {
-	svc, err := svcCreator(ddb.region)
-	if err != nil {
-		return nil, err
-	}
-
 	input := &dynamodb.GetItemInput{
 		TableName: aws.String(ddb.name),
 		Key: map[string]types.AttributeValue{
@@ -109,7 +104,7 @@ func (ddb *DDBTable) ReadItem(partitionKeyValue string) (map[string]interface{},
 		},
 	}
 
-	result, err := svc.GetItem(context.TODO(), input)
+	result, err := ddb.client.GetItem(context.Background(), input)
 	if err != nil {
 		return nil, errors.New("failed to get item")
 	}
@@ -121,18 +116,13 @@ func (ddb *DDBTable) ReadItem(partitionKeyValue string) (map[string]interface{},
 }
 
 func (ddb *DDBTable) WriteItem(item map[string]interface{}) error {
-	svc, err := svcCreator(ddb.region)
-	if err != nil {
-		return err
-	}
-
 	dynamodbItem := convertToDynamoDBJSON(item)
 	input := &dynamodb.PutItemInput{
 		TableName: aws.String(ddb.name),
 		Item:      dynamodbItem,
 	}
 
-	_, err = svc.PutItem(context.TODO(), input)
+	_, err := ddb.client.PutItem(context.Background(), input)
 	if err != nil {
 		return err
 	}
@@ -141,11 +131,6 @@ func (ddb *DDBTable) WriteItem(item map[string]interface{}) error {
 }
 
 func (ddb *DDBTable) UpdateItem(partitionKeyValue string, updatedValue map[string]interface{}) error {
-	svc, err := svcCreator(ddb.region)
-	if err != nil {
-		return err
-	}
-
 	dynamoDBUpdateValues := convertToDynamoDBJSON(updatedValue)
 	updateExpression := "SET "
 	expressionAttributeValues := make(map[string]types.AttributeValue)
@@ -168,7 +153,7 @@ func (ddb *DDBTable) UpdateItem(partitionKeyValue string, updatedValue map[strin
 		ExpressionAttributeNames:  expressionAttributeNames,
 	}
 
-	_, err = svc.UpdateItem(context.TODO(), input)
+	_, err := ddb.client.UpdateItem(context.Background(), input)
 	if err != nil {
 		return err
 	}
@@ -177,11 +162,6 @@ func (ddb *DDBTable) UpdateItem(partitionKeyValue string, updatedValue map[strin
 }
 
 func (ddb *DDBTable) DeleteItem(partitionKeyValue string) error {
-	svc, err := svcCreator(ddb.region)
-	if err != nil {
-		return err
-	}
-
 	input := &dynamodb.DeleteItemInput{
 		TableName: aws.String(ddb.name),
 		Key: map[string]types.AttributeValue{
@@ -191,7 +171,7 @@ func (ddb *DDBTable) DeleteItem(partitionKeyValue string) error {
 		},
 	}
 
-	_, err = svc.DeleteItem(context.TODO(), input)
+	_, err := ddb.client.DeleteItem(context.Background(), input)
 	if err != nil {
 		return err
 	}
@@ -200,35 +180,33 @@ func (ddb *DDBTable) DeleteItem(partitionKeyValue string) error {
 }
 
 func DDBTablesList(awsRegion string) ([]string, error) {
-	svc, err := svcCreator(awsRegion)
+	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(awsRegion))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to load AWS SDK config: %v", err)
 	}
+
+	client := dynamodb.NewFromConfig(cfg)
 
 	input := &dynamodb.ListTablesInput{}
-	result, err := svc.ListTables(context.TODO(), input)
-	if err != nil {
-		return nil, err
+
+	var tables []string
+	paginator := dynamodb.NewListTablesPaginator(client, input)
+
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("failed to list tables: %v", err)
+		}
+
+		tables = append(tables, page.TableNames...)
 	}
 
-	return result.TableNames, nil
+	return tables, nil
 }
 
 ////////////////////////
 // Internal functions //
 ////////////////////////
-
-func svcCreator(awsRegion string) (*dynamodb.Client, error) {
-	// Create AWS configuration
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(awsRegion))
-	if err != nil {
-		return nil, err
-	}
-
-	svc := dynamodb.NewFromConfig(cfg)
-
-	return svc, nil
-}
 
 func convertToDynamoDBJSON(regularJSON map[string]interface{}) map[string]types.AttributeValue {
 	dynamodbJSON := make(map[string]types.AttributeValue)
